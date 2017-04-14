@@ -23,6 +23,11 @@ fn read_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
     Ok(contents)
 }
 
+fn write_file<P: AsRef<Path>>(path: P, data: String) -> io::Result<()> {
+    let mut file = File::create(path)?;
+    file.write_all(data.as_bytes())
+}
+
 /// Parse a csv formatted file passed in as a string
 ///
 /// The format of `contents` should be lines of comma separated f64 values.
@@ -77,6 +82,8 @@ fn main() {
         Perceptron::new(8),
         Perceptron::new(9),
     ];
+    let mut training_results: Vec<f64> = Vec::with_capacity(51);
+    let mut test_results: Vec<f64> = Vec::with_capacity(51);
     let training_filename = "mnist_train.csv";
     let test_filename = "mnist_test.csv";
     println!("Reading from {}", training_filename);
@@ -90,8 +97,12 @@ fn main() {
     let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::new(&row)).collect();
 
     println!("Calculating Initial Accuracy");
-    println!("Training Accuracy: {}", calculate_accuracy(&training_inputs, &perceptrons));
-    println!("Test Accuracy: {}", calculate_accuracy(&test_inputs, &perceptrons));
+    let training_accuracy = calculate_accuracy(&training_inputs, &perceptrons);
+    training_results.push(training_accuracy);
+    println!("Training Accuracy: {}", training_accuracy);
+    let test_accuracy = calculate_accuracy(&test_inputs, &perceptrons);
+    test_results.push(test_accuracy);
+    println!("Test Accuracy: {}", test_accuracy);
 
     for epoch in 1..NUM_EPOCHS + 1 {
         println!("Epoch {}:", epoch);
@@ -100,7 +111,16 @@ fn main() {
                 perceptron.update(learning_rate, input);
             }
         }
-        println!("Training Accuracy: {}", calculate_accuracy(&training_inputs, &perceptrons));
-        println!("Test Accuracy: {}", calculate_accuracy(&test_inputs, &perceptrons));
+        let training_accuracy = calculate_accuracy(&training_inputs, &perceptrons);
+        training_results.push(training_accuracy);
+        println!("Training Accuracy: {}", training_accuracy);
+        let test_accuracy = calculate_accuracy(&test_inputs, &perceptrons);
+        test_results.push(test_accuracy);
+        println!("Test Accuracy: {}", test_accuracy);
     }
+
+    let training_out = training_results.iter().map(f64::to_string).collect::<Vec<String>>().join(",");
+    write_file(format!("training_eta_{}.csv", learning_rate), training_out).expect("Failed to write training data");
+    let test_out = test_results.iter().map(f64::to_string).collect::<Vec<String>>().join(",");
+    write_file(format!("test_eta_{}.csv", learning_rate), test_out).expect("Failed to write test data");
 }
