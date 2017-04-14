@@ -55,7 +55,16 @@ fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
     ((correct as f64) / (data_set.len() as f64))
 }
 
+fn exit_with_usage() -> ! {
+    println!("USAGE: {} <learning_rate> [training_file test_file]", std::env::args().nth(0).unwrap());
+    std::process::exit(1);
+}
+
 fn main() {
+    let learning_rate = match std::env::args().nth(1) {
+        Some(eta) => eta.parse::<f64>().expect("learning_rate must be a number!"),
+        None => exit_with_usage(),
+    };
     let mut perceptrons = [
         Perceptron::new(0),
         Perceptron::new(1),
@@ -88,7 +97,7 @@ fn main() {
         println!("Epoch {}:", epoch);
         for input in training_inputs.iter() {
             for perceptron in perceptrons.iter_mut() {
-                perceptron.update(0.01, input);
+                perceptron.update(learning_rate, input);
             }
         }
         println!("Training Accuracy: {}", calculate_accuracy(&training_inputs, &perceptrons));
