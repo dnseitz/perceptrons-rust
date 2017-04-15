@@ -4,6 +4,7 @@ extern crate rayon;
 
 mod perceptron;
 mod input;
+mod network;
 
 use std::fs::File;
 use std::path::Path;
@@ -12,6 +13,7 @@ use std::io::prelude::*;
 use input::Input;
 use perceptron::Perceptron;
 use rayon::prelude::*;
+use network::NetworkBuilder;
 
 const INPUT_SIZE: usize = 785;
 const NUM_EPOCHS: usize = 50;
@@ -41,7 +43,7 @@ fn parse_csv(contents: String) -> Vec<Vec<f64>> {
     .collect()
 }
 
-fn predict(data: &Input, perceptrons: &[Perceptron]) -> u32 {
+fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
     perceptrons.iter()
         .map(|perceptron| (perceptron.calculate(data), perceptron.target_class()))
         .max_by(|&(x, _), &(y, _)| x.partial_cmp(&y).expect("Unable to find max value!"))
@@ -66,24 +68,29 @@ fn exit_with_usage() -> ! {
 }
 
 fn main() {
+    let mut network = NetworkBuilder::new(INPUT_SIZE)
+                    .add_layer(20)
+                    .add_layer(20)
+                    .add_layer(20)
+                    .finalize(10);
+
+/*
+    let mut network = network::Network::fake();
+
+    println!("{:#?}", network);
+    network.fake_update(0.2, 0.9, 0.9, &[1.0, 1.0, 0.0]);
+    println!("{:#?}", network);
+*/
+
+    //println!("Generated network: {:#?}", network);
+    /*
     let learning_rate = match std::env::args().nth(1) {
         Some(eta) => eta.parse::<f64>().expect("learning_rate must be a number!"),
         None => exit_with_usage(),
     };
-    let mut perceptrons = [
-        Perceptron::new(0),
-        Perceptron::new(1),
-        Perceptron::new(2),
-        Perceptron::new(3),
-        Perceptron::new(4),
-        Perceptron::new(5),
-        Perceptron::new(6),
-        Perceptron::new(7),
-        Perceptron::new(8),
-        Perceptron::new(9),
-    ];
     let mut training_results: Vec<f64> = Vec::with_capacity(51);
     let mut test_results: Vec<f64> = Vec::with_capacity(51);
+    */
     let training_filename = "mnist_train.csv";
     let test_filename = "mnist_test.csv";
     println!("Reading from {}", training_filename);
@@ -96,14 +103,31 @@ fn main() {
     println!("Parsing test data");
     let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::new(&row)).collect();
 
+    //println!("Calculating first input: {}", network.calculate(&training_inputs[0]));
+    println!("Calculating Inital Accuracy");
     println!("Calculating Initial Accuracy");
-    let training_accuracy = calculate_accuracy(&training_inputs, &perceptrons);
-    training_results.push(training_accuracy);
+    let training_accuracy = network.calculate_accuracy(&training_inputs);
+    //training_results.push(training_accuracy);
     println!("Training Accuracy: {}", training_accuracy);
-    let test_accuracy = calculate_accuracy(&test_inputs, &perceptrons);
-    test_results.push(test_accuracy);
+    let test_accuracy = network.calculate_accuracy(&test_inputs);
+    //test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
 
+    for _ in 0..50 {
+        println!("Updating Network");
+        for input in training_inputs.iter() {
+            network.update(0.1, 0.9, input);
+        }
+
+        let training_accuracy = network.calculate_accuracy(&training_inputs);
+        //training_results.push(training_accuracy);
+        println!("Training Accuracy: {}", training_accuracy);
+        let test_accuracy = network.calculate_accuracy(&test_inputs);
+        //test_results.push(test_accuracy);
+        println!("Test Accuracy: {}", test_accuracy);
+    }
+
+    /*
     for epoch in 1..NUM_EPOCHS + 1 {
         println!("Epoch {}:", epoch);
         for input in training_inputs.iter() {
@@ -123,4 +147,5 @@ fn main() {
     write_file(format!("training_eta_{}.csv", learning_rate), training_out).expect("Failed to write training data");
     let test_out = test_results.iter().map(f64::to_string).collect::<Vec<String>>().join(",");
     write_file(format!("test_eta_{}.csv", learning_rate), test_out).expect("Failed to write test data");
+    */
 }

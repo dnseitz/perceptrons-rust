@@ -5,8 +5,9 @@ use INPUT_SIZE;
 
 #[derive(Debug)]
 pub struct Input {
-    expected: u32,
-    input: Inner,
+    expected: usize,
+    //input: Inner,
+    input: Box<[f64]>,
 }
 
 struct Inner([f64; INPUT_SIZE]);
@@ -14,28 +15,29 @@ struct Inner([f64; INPUT_SIZE]);
 impl Input {
     /// Create a new input from a raw array
     pub fn new(raw_data: &[f64]) -> Self {
-        assert!(raw_data.len() == INPUT_SIZE, "Invalid input size!");
-        let expected = raw_data[0] as u32;
-        let mut input = [0f64; INPUT_SIZE];
-        for (i, elem) in raw_data.iter().enumerate() {
-            input[i] = elem / 255f64;
-        }
-        input[0] = 1f64;
+        let expected = raw_data[0] as usize;
+        let mut input = raw_data.iter().map(|elem| elem / 255.0).collect::<Vec<f64>>().into_boxed_slice();
+        input[0] = 1.0;
         Input {
             expected: expected,
-            input: Inner(input),
+            input: input,
         }
     }
 
-    pub fn expected(&self) -> u32 {
+    pub fn expected(&self) -> usize {
         self.expected
     }
 
     pub fn iter(&self) -> ::std::slice::Iter<f64> {
         self.input.iter()
     }
+
+    pub fn len(&self) -> usize {
+        self.input.len()
+    }
 }
 
+/*
 impl Deref for Inner {
     type Target = [f64; INPUT_SIZE];
 
@@ -53,3 +55,4 @@ impl Debug for Inner {
         write!(f, "]")
     }
 }
+*/

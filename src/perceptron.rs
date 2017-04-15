@@ -6,11 +6,11 @@ use input::Input;
 
 pub struct Perceptron {
     weights: [f64; INPUT_SIZE],
-    target_class: u32,
+    target_class: usize,
 }
 
 impl Perceptron {
-    pub fn new(target_class: u32) -> Self {
+    pub fn new(target_class: usize) -> Self {
         let mut weights = [0f64; INPUT_SIZE];
         for weight in &mut weights[..] {
             *weight = rand::thread_rng().gen_range(-0.05f64, 0.05f64);
@@ -21,7 +21,7 @@ impl Perceptron {
         }
     }
 
-    pub fn target_class(&self) -> u32 {
+    pub fn target_class(&self) -> usize {
         self.target_class
     }
 
