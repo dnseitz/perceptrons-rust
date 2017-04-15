@@ -69,9 +69,7 @@ fn exit_with_usage() -> ! {
 
 fn main() {
     let mut network = NetworkBuilder::new(INPUT_SIZE)
-                    .add_layer(20)
-                    .add_layer(20)
-                    .add_layer(20)
+                    .add_layer(100)
                     .finalize(10);
 
 /*
@@ -103,15 +101,26 @@ fn main() {
     println!("Parsing test data");
     let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::new(&row)).collect();
 
+    /*
     //println!("Calculating first input: {}", network.calculate(&training_inputs[0]));
-    println!("Calculating Inital Accuracy");
-    println!("Calculating Initial Accuracy");
+    println!("Calculating Initial Training Accuracy");
     let training_accuracy = network.calculate_accuracy(&training_inputs);
     //training_results.push(training_accuracy);
     println!("Training Accuracy: {}", training_accuracy);
     let test_accuracy = network.calculate_accuracy(&test_inputs);
+    println!("Calculating Initial Test Accuracy");
     //test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
+    */
+
+
+        println!("Updating Network");
+        for input in training_inputs.iter() {
+            network.update(0.1, 0.9, input);
+        }
+
+
+    return;
 
     for _ in 0..50 {
         println!("Updating Network");
