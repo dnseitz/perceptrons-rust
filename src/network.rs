@@ -1,5 +1,4 @@
 
-use perceptron::Perceptron;
 use rand::{self, Rng};
 use input::Input;
 use std::ops::{Deref, DerefMut};
@@ -263,10 +262,16 @@ impl Layer {
 
     /// Update the layer, returning the error terms for this layer
     fn update(&mut self, learning_rate: f64, momentum: f64, input: &Transient, error_terms: Vec<ErrorTerm>) -> Vec<ErrorTerm> {
-        self.nodes.par_iter_mut().enumerate().filter_map(|(i, node)| {
+        self.nodes.par_iter_mut().enumerate().map(|(i, node)| {
             let e_terms = error_terms.iter().map(|term| (term.weights[i], term.error)).collect::<Vec<(f64, f64)>>();
             node.update(learning_rate, momentum, input, &e_terms)
+        }).filter(|e| e.is_some()).map(|e| e.unwrap()).collect::<Vec<ErrorTerm>>()
+        /*
+        self.nodes.iter_mut().enumerate().filter_map(|(i, node)| {
+            let e_terms = error_terms.par_iter().map(|term| (term.weights[i], term.error)).collect::<Vec<(f64, f64)>>();
+            node.update(learning_rate, momentum, input, &e_terms)
         }).collect::<Vec<ErrorTerm>>()
+        */
     }
 }
 

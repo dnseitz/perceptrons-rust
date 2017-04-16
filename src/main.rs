@@ -2,7 +2,7 @@
 extern crate rand;
 extern crate rayon;
 
-mod perceptron;
+//mod perceptron;
 mod input;
 mod network;
 
@@ -11,7 +11,7 @@ use std::path::Path;
 use std::io;
 use std::io::prelude::*;
 use input::Input;
-use perceptron::Perceptron;
+//use perceptron::Perceptron;
 use rayon::prelude::*;
 use network::NetworkBuilder;
 
@@ -43,6 +43,7 @@ fn parse_csv(contents: String) -> Vec<Vec<f64>> {
     .collect()
 }
 
+/*
 fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
     perceptrons.iter()
         .map(|perceptron| (perceptron.calculate(data), perceptron.target_class()))
@@ -50,7 +51,9 @@ fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
         .expect("Unable to find max value!")
         .1
 }
+*/
 
+/*
 fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
     let mut correct = 0;
     for input in data_set {
@@ -61,6 +64,7 @@ fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
     }
     ((correct as f64) / (data_set.len() as f64))
 }
+*/
 
 fn exit_with_usage() -> ! {
     println!("USAGE: {} <learning_rate> [training_file test_file]", std::env::args().nth(0).unwrap());
@@ -101,7 +105,6 @@ fn main() {
     println!("Parsing test data");
     let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::new(&row)).collect();
 
-    /*
     //println!("Calculating first input: {}", network.calculate(&training_inputs[0]));
     println!("Calculating Initial Training Accuracy");
     let training_accuracy = network.calculate_accuracy(&training_inputs);
@@ -111,16 +114,15 @@ fn main() {
     println!("Calculating Initial Test Accuracy");
     //test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
-    */
 
-
+/*
         println!("Updating Network");
         for input in training_inputs.iter() {
             network.update(0.1, 0.9, input);
         }
 
-
-    return;
+        return;
+*/
 
     for _ in 0..50 {
         println!("Updating Network");
