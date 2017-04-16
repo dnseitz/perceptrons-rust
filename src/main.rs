@@ -73,7 +73,7 @@ fn exit_with_usage() -> ! {
 
 fn main() {
     let mut network = NetworkBuilder::new(INPUT_SIZE)
-                    .add_layer(100)
+                    .add_layer(20)
                     .finalize(10);
 
 /*
@@ -102,9 +102,9 @@ fn main() {
     let test_data = read_file(test_filename).expect("Failed to read test file");
 
     println!("Parsing training data");
-    let training_inputs: Vec<Input> = parse_csv(training_data).par_iter().map(|row| Input::new(&row)).collect();
+    let training_inputs: Vec<Input> = parse_csv(training_data).par_iter().map(|row| Input::from_greyscale(&row)).collect();
     println!("Parsing test data");
-    let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::new(&row)).collect();
+    let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::from_greyscale(&row)).collect();
 
     //println!("Calculating first input: {}", network.calculate(&training_inputs[0]));
     println!("Calculating Initial Training Accuracy");
@@ -125,7 +125,8 @@ fn main() {
         return;
     */
 
-    for _ in 0..50 {
+    for epoch in 0..NUM_EPOCHS {
+        println!("Running Epoch: {}", epoch);
         println!("Updating Network");
         for input in training_inputs.iter() {
             network.update(0.1, 0.9, input);

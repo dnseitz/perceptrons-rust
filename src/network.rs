@@ -1,7 +1,7 @@
 
 use rand::{self, Rng};
 use input::Input;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Index, Deref, DerefMut};
 use rayon::prelude::*;
 
 /*
@@ -33,11 +33,30 @@ macro_rules! neuron {
 }
 */
 
-struct Transient {
+pub type OutputResults = Transient;
+
+pub struct Transient {
     data: Box<[f64]>,
 }
 
 impl Transient {
+    pub fn max(&self) -> f64 {
+        *self.iter()
+        .max_by(|x, y| x.partial_cmp(y)
+                        .expect("Unable to get maximum value of output!"))
+        .expect("Unable to get maximum value of output!")
+    }
+
+    pub fn max_class(&self) -> usize {
+        self.iter()
+        .enumerate()
+        .max_by(|&x, &y| (x.1)
+                         .partial_cmp(y.1)
+                         .expect("Unable to get maximum value of output!"))
+        .expect("Unable to get maximum value of output!")
+        .0
+    }
+
     fn iter(&self) -> ::std::slice::Iter<f64> {
         self.data.iter()
     }
@@ -47,6 +66,37 @@ impl Transient {
     }
 }
 
+impl Index<usize> for Transient {
+    type Output = f64;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.data[index]
+    }
+}
+
+impl<'a> From<&'a Input> for Transient {
+    fn from(data: &Input) -> Self {
+        Transient::from(data.data())
+    }
+}
+
+impl From<Vec<f64>> for Transient {
+    fn from(data: Vec<f64>) -> Self {
+        Transient {
+            data: data.into_boxed_slice(),
+        }
+    }
+}
+
+impl<'a> From<&'a [f64]> for Transient {
+    fn from(data: &[f64]) -> Self {
+        Transient {
+            data: data.iter().map(f64::clone).collect::<Vec<_>>().into_boxed_slice(),
+        }
+    }
+}
+
+#[derive(Debug)]
 struct ErrorTerm {
     error: f64,
     weights: Box<[f64]>,
@@ -82,6 +132,14 @@ impl Neuron {
             Neuron::Bias => None,
             Neuron::Hidden(ref mut node) => Some(node.update(learning_rate, momentum, input, error_terms)),
             Neuron::Output(ref mut node) => Some(node.update(learning_rate, momentum, input)),
+        }
+    }
+
+    fn get_inner_node(&self) -> Option<&Node> {
+        match *self {
+            Neuron::Bias => None,
+            Neuron::Hidden(ref node) => Some(node),
+            Neuron::Output(ref node) => Some(node),
         }
     }
 }
@@ -120,6 +178,15 @@ impl Node {
         //      sigma(w * x) = sigma(z) = 1 / (1 + e^-z)
         self.output = 1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) );
         self.output
+    }
+}
+
+impl<'a> From<&'a [f64]> for Node {
+    fn from(weights: &[f64]) -> Self {
+        Node {
+            weights: weights.iter().map(|w| (0.0, *w)).collect::<Vec<_>>().into_boxed_slice(),
+            output: 0.0,
+        }
     }
 }
 
@@ -259,9 +326,7 @@ impl Layer {
     }
 
     fn calculate(&mut self, input: &Transient) -> Transient {
-        Transient {
-            data: self.nodes.par_iter_mut().map(|node| node.calculate(input)).collect::<Vec<f64>>().into_boxed_slice(),
-        }
+        Transient::from(self.nodes.par_iter_mut().map(|node| node.calculate(input)).collect::<Vec<_>>())
     }
 
     /// Update the layer, returning the error terms for this layer
@@ -270,6 +335,14 @@ impl Layer {
             let e_terms = error_terms.iter().map(|term| (term.weights[i], term.error)).collect::<Vec<(f64, f64)>>();
             node.update(learning_rate, momentum, input, &e_terms)
         }).filter(|e| e.is_some()).map(|e| e.unwrap()).collect::<Vec<ErrorTerm>>()
+    }
+}
+
+impl From<Vec<Neuron>> for Layer {
+    fn from(nodes: Vec<Neuron>) -> Self {
+        Layer {
+            nodes: nodes.into_boxed_slice(),
+        }
     }
 }
 
@@ -309,13 +382,15 @@ impl Network {
         else {
             panic!("Node in output layer wasn't an output node!");
         }
-        let transient_input = Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
+        let transient_input = Transient::from(input);
+        //Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
 
-        update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
+        Self::update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
     }
 
     pub fn update(&mut self, learning_rate: f64, momentum: f64, input: &Input) {
-        let transient_input = Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
+        let transient_input = Transient::from(input);
+
         for (i, node) in self.output.nodes.iter_mut().enumerate() {
             if let Neuron::Output(ref mut node) = *node {
                 node.target = if i == input.expected() { 0.9 } else { 0.1 }
@@ -325,34 +400,50 @@ impl Network {
             }
         }
 
-        update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
+        Self::update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
     }
 
-    pub fn calculate(&mut self, input: &Input) -> usize {
-        let mut transient_input = Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
+    fn update_rec(learning_rate: f64, momentum: f64, input: &Transient, output: &mut Layer, layers: &mut [Layer]) -> Vec<ErrorTerm> {
+        if layers.len() == 0 {
+            output.calculate(input);
+            output.update(learning_rate, momentum, input, Vec::new())
+        }
+        else {
+            let next_input = layers[0].calculate(input);
+            let error_terms = Self::update_rec(learning_rate, momentum, &next_input, output, &mut layers[1..]);
+            layers[0].update(learning_rate, momentum, input, error_terms)
+        }
+    }
+
+    pub fn calculate(&mut self, input: &Input) -> OutputResults {
+        let mut transient_input = Transient::from(input);
 
         for layer in self.hidden.iter_mut() {
             transient_input = layer.calculate(&transient_input);
         }
-        let output = self.output.calculate(&transient_input);
-        output.iter()
-        .enumerate()
-        .max_by(|&x, &y| (x.1)
-                         .partial_cmp(y.1)
-                         .expect("Unable to get maximum value of output!"))
-        .expect("Unable to get maximum value of output!")
-        .0
+        self.output.calculate(&transient_input)
     }
 
     pub fn calculate_accuracy(&mut self, data_set: &[Input]) -> f64 {
         let mut correct = 0;
         for input in data_set {
-            let predicted = self.calculate(&input);
+            let predicted = self.calculate(&input).max_class();
             if predicted == input.expected() {
                 correct += 1;
             }
         }
         ((correct as f64) / (data_set.len() as f64))
+    }
+}
+
+impl From<Vec<Layer>> for Network {
+    fn from(mut layers: Vec<Layer>) -> Self {
+        let output = layers.pop().expect("No output layer specified when trying to create network!");
+
+        Network {
+            hidden: layers.into_boxed_slice(),
+            output: output,
+        }
     }
 }
 
@@ -389,15 +480,134 @@ impl NetworkBuilder {
     }
 }
 
-fn update_rec(learning_rate: f64, momentum: f64, input: &Transient, output: &mut Layer, layers: &mut [Layer]) -> Vec<ErrorTerm> {
-    if layers.len() == 0 {
-        output.calculate(input);
-        output.update(learning_rate, momentum, input, Vec::new())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_to(float: f64, digits: i32) -> f64 {
+        (float * 10.0f64.powi(digits)).round() / 10.0f64.powi(digits)
     }
-    else {
-        let next_input = layers[0].calculate(input);
-        let error_terms = update_rec(learning_rate, momentum, &next_input, output, &mut layers[1..]);
-        layers[0].update(learning_rate, momentum, input, error_terms)
+
+    #[test]
+    fn test_node_calculate() {
+        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
+        let mut node = Node::from(&[0.1, 0.1, 0.1][..]);
+        assert_eq!(round_to(node.calculate(&data), 2), 0.55);
+    }
+
+    #[test]
+    fn test_output_update() {
+        let data = Transient::from(&[1.0, 0.55, 0.55][..]);
+        let mut node = Output {
+            target: 0.9,
+            inner: Node::from(&[0.1, 0.1, 0.1][..]),
+        };
+        node.calculate(&data);
+        node.update(0.2, 0.9, &data);
+        assert_eq!(round_to(node.inner.weights[0].1, 4), 0.1172);
+        assert_eq!(round_to(node.inner.weights[1].1, 4), 0.1095);
+        assert_eq!(round_to(node.inner.weights[2].1, 4), 0.1095);
+    }
+
+    #[test]
+    fn test_hidden_update() {
+        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
+        let mut node = Hidden {
+            inner: Node::from(&[0.1, 0.1, 0.1][..]),
+        };
+        node.calculate(&data);
+        node.update(0.2, 0.9, &data, &[(0.086, 0.1)]);
+        assert_eq!(round_to(node.inner.weights[0].1, 4), 0.1004);
+        assert_eq!(round_to(node.inner.weights[1].1, 4), 0.1004);
+        assert_eq!(round_to(node.inner.weights[2].1, 4), 0.1000);
+    }
+
+    #[test]
+    fn test_layer_calculate() {
+        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
+        let mut layer = Layer::from(vec![Neuron::Bias,
+            Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
+            Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
+        ]);
+        let result = layer.calculate(&data);
+        assert_eq!(round_to(result.data[0], 2), 1.00);
+        assert_eq!(round_to(result.data[1], 2), 0.55);
+        assert_eq!(round_to(result.data[2], 2), 0.55);
+    }
+
+    #[test]
+    fn test_layer_update() {
+        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
+        let error_terms = vec![ErrorTerm::new(0.086, vec![0.1, 0.1, 0.1].into_boxed_slice())];
+        let mut layer = Layer::from(vec![Neuron::Bias,
+            Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
+            Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
+        ]);
+        layer.calculate(&data);
+        let new_error_terms = layer.update(0.2, 0.9, &data, error_terms);
+
+        // First hidden node's weights
+        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
+        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
+        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
+
+        // Second hidden node's weights
+        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
+        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
+        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
+
+        assert_eq!(round_to(new_error_terms[0].error, 3), 0.002);
+        assert_eq!(round_to(new_error_terms[1].error, 3), 0.002);
+    }
+
+    #[test]
+    fn test_network_calculate() {
+        let data = Input::from_raw(0, &[1.0, 1.0, 0.0]);
+        let mut network = Network::from(vec![
+            Layer::from(vec![Neuron::Bias,
+                Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
+                Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
+            ]),
+            Layer::from(vec![Neuron::Output(Output {
+                inner: Node::from(&[0.1, 0.1, 0.1][..]),
+                target: 0.9,
+            })])
+        ]);
+
+        let result = network.calculate(&data);
+
+        assert_eq!(round_to(result.max(), 3), 0.552);
+    }
+
+    #[test]
+    fn test_network_update() {
+        let data = Input::from_raw(0, &[0.0, 1.0, 0.0]);
+        let mut network = Network::from(vec![
+            Layer::from(vec![Neuron::Bias,
+                Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
+                Neuron::Hidden(Hidden { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
+            ]),
+            Layer::from(vec![Neuron::Output(Output {
+                inner: Node::from(&[0.1, 0.1, 0.1][..]),
+                target: 0.9,
+            })])
+        ]);
+
+        network.update(0.2, 0.9, &data);
+
+        // First hidden node's weights
+        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
+        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
+        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
+
+        // Second hidden node's weights
+        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
+        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
+        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
+
+        // Output node's weights
+        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[0].1, 4), 0.1172);
+        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[1].1, 4), 0.1095);
+        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[2].1, 4), 0.1095);
     }
 }
-
