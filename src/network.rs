@@ -69,11 +69,11 @@ enum Neuron {
 }
 
 impl Neuron {
-    fn calculate(&self, input: &Transient) -> f64 {
+    fn calculate(&mut self, input: &Transient) -> f64 {
         match *self {
             Neuron::Bias => 1.0,
-            Neuron::Hidden(ref node) => node.calculate(input),
-            Neuron::Output(ref node) => node.calculate(input),
+            Neuron::Hidden(ref mut node) => node.calculate(input),
+            Neuron::Output(ref mut node) => node.calculate(input),
         }
     }
 
@@ -90,6 +90,7 @@ impl Neuron {
 struct Node {
     // (prev_delta, weight)
     weights: Box<[(f64, f64)]>,
+    output: f64,
 }
 
 impl Node {
@@ -100,21 +101,25 @@ impl Node {
         }
         Node {
             weights: weights.into_boxed_slice(),
+            output: 0.0,
         }
     }
 
     fn fake(num_weights: usize, weight_value: f64) -> Self {
-        Node { weights: vec![(0.0, weight_value); num_weights].into_boxed_slice() }
+        Node {
+            weights: vec![(0.0, weight_value); num_weights].into_boxed_slice(),
+            output: 0.0,
+        }
     }
 
-    fn calculate(&self, input: &Transient) -> f64 {
+    fn calculate(&mut self, input: &Transient) -> f64 {
         assert_eq!(input.len(), self.weights.len(),
-            "Input vector passed into neuron does not have the correct length! {} weights, {} inputs",
-            self.weights.len(), input.len());
+            "Input vector passed into neuron does not have the correct length!");
 
         // Sigmoid activation function:
         //      sigma(w * x) = sigma(z) = 1 / (1 + e^-z)
-        1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) )
+        self.output = 1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) );
+        self.output
     }
 }
 
@@ -133,7 +138,7 @@ impl Hidden {
     }
 
     fn update(&mut self, learning_rate: f64, momentum: f64, input: &Transient, error_terms: &[(f64, f64)]) -> ErrorTerm {
-        let h = self.calculate(input);
+        let h = self.output;
         let delta_j = h*(1.0 - h)*error_terms.iter().map(|&(w, error)| w * error).sum::<f64>();
         let old_weights = self.weights.iter().map(|weight| weight.1).collect::<Vec<f64>>();
         for (weight, x) in self.weights.iter_mut().zip(input.iter()) {
@@ -179,14 +184,13 @@ impl Output {
         }
     }
 
-    fn update(&mut self, learning_rate: f64, momentum: f64, input: &Transient) -> ErrorTerm {
-        let o = self.calculate(input);
+    fn update(&mut self, learning_rate: f64, momentum: f64 , input: &Transient) -> ErrorTerm {
+        let o = self.output;
         let delta_k = o*(1.0 - o)*(self.target - o);
         let old_weights = self.weights.iter().map(|weight| weight.1).collect::<Vec<f64>>();
         for (weight, x) in self.weights.iter_mut().zip(input.iter()) {
             let delta = learning_rate * delta_k * x + momentum * weight.0;
             *weight = (delta, weight.1 + delta);
-            //*weight.1 += learning_rate * delta_k * x + momentum * prev;
         }
         ErrorTerm::new(delta_k, old_weights.into_boxed_slice())
     }
@@ -254,9 +258,9 @@ impl Layer {
         }
     }
 
-    fn calculate(&self, input: &Transient) -> Transient {
+    fn calculate(&mut self, input: &Transient) -> Transient {
         Transient {
-            data: self.nodes.par_iter().map(|node| node.calculate(input)).collect::<Vec<f64>>().into_boxed_slice(),
+            data: self.nodes.par_iter_mut().map(|node| node.calculate(input)).collect::<Vec<f64>>().into_boxed_slice(),
         }
     }
 
@@ -266,12 +270,6 @@ impl Layer {
             let e_terms = error_terms.iter().map(|term| (term.weights[i], term.error)).collect::<Vec<(f64, f64)>>();
             node.update(learning_rate, momentum, input, &e_terms)
         }).filter(|e| e.is_some()).map(|e| e.unwrap()).collect::<Vec<ErrorTerm>>()
-        /*
-        self.nodes.iter_mut().enumerate().filter_map(|(i, node)| {
-            let e_terms = error_terms.par_iter().map(|term| (term.weights[i], term.error)).collect::<Vec<(f64, f64)>>();
-            node.update(learning_rate, momentum, input, &e_terms)
-        }).collect::<Vec<ErrorTerm>>()
-        */
     }
 }
 
@@ -330,10 +328,10 @@ impl Network {
         update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
     }
 
-    pub fn calculate(&self, input: &Input) -> usize {
+    pub fn calculate(&mut self, input: &Input) -> usize {
         let mut transient_input = Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
 
-        for layer in self.hidden.iter() {
+        for layer in self.hidden.iter_mut() {
             transient_input = layer.calculate(&transient_input);
         }
         let output = self.output.calculate(&transient_input);
@@ -346,7 +344,7 @@ impl Network {
         .0
     }
 
-    pub fn calculate_accuracy(&self, data_set: &[Input]) -> f64 {
+    pub fn calculate_accuracy(&mut self, data_set: &[Input]) -> f64 {
         let mut correct = 0;
         for input in data_set {
             let predicted = self.calculate(&input);
@@ -393,11 +391,8 @@ impl NetworkBuilder {
 
 fn update_rec(learning_rate: f64, momentum: f64, input: &Transient, output: &mut Layer, layers: &mut [Layer]) -> Vec<ErrorTerm> {
     if layers.len() == 0 {
-        //println!("Updating output layer");
-        //println!("Before: {:#?}", output);
-        let ret = output.update(learning_rate, momentum, input, Vec::new());
-        //println!("After: {:#?}", output);
-        ret
+        output.calculate(input);
+        output.update(learning_rate, momentum, input, Vec::new())
     }
     else {
         let next_input = layers[0].calculate(input);

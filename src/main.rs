@@ -82,8 +82,9 @@ fn main() {
     println!("{:#?}", network);
     network.fake_update(0.2, 0.9, 0.9, &[1.0, 1.0, 0.0]);
     println!("{:#?}", network);
-*/
 
+    return;
+*/
     //println!("Generated network: {:#?}", network);
     /*
     let learning_rate = match std::env::args().nth(1) {
@@ -115,14 +116,14 @@ fn main() {
     //test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
 
-/*
+    /*
         println!("Updating Network");
         for input in training_inputs.iter() {
             network.update(0.1, 0.9, input);
         }
 
         return;
-*/
+    */
 
     for _ in 0..50 {
         println!("Updating Network");
