@@ -2,7 +2,6 @@
 extern crate rand;
 extern crate rayon;
 
-//mod perceptron;
 mod input;
 mod network;
 
@@ -11,7 +10,6 @@ use std::path::Path;
 use std::io;
 use std::io::prelude::*;
 use input::Input;
-//use perceptron::Perceptron;
 use rayon::prelude::*;
 use network::NetworkBuilder;
 
@@ -42,29 +40,6 @@ fn parse_csv(contents: String) -> Vec<Vec<f64>> {
                            .collect())
     .collect()
 }
-
-/*
-fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
-    perceptrons.iter()
-        .map(|perceptron| (perceptron.calculate(data), perceptron.target_class()))
-        .max_by(|&(x, _), &(y, _)| x.partial_cmp(&y).expect("Unable to find max value!"))
-        .expect("Unable to find max value!")
-        .1
-}
-*/
-
-/*
-fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
-    let mut correct = 0;
-    for input in data_set {
-        let predicted = predict(input, perceptrons);
-        if predicted == input.expected() {
-            correct += 1;
-        }
-    }
-    ((correct as f64) / (data_set.len() as f64))
-}
-*/
 
 fn exit_with_usage() -> ! {
     println!("USAGE: {} <learning_rate> [training_file test_file]", std::env::args().nth(0).unwrap());

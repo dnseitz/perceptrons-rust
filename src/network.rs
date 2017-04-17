@@ -4,35 +4,6 @@ use input::Input;
 use std::ops::{Index, Deref, DerefMut};
 use rayon::prelude::*;
 
-/*
-macro_rules! neuron {
-    ($name:ident[$N:expr]) => {
-        struct $name {
-            weights: [f64; $N],
-        }
-        impl $name {
-            fn new() -> Self {
-                let mut weights = [0f64; $N];
-                for weight in &mut weights[..] {
-                    *weight = rand::thread_rng().gen_range(-0.05, 0.05);
-                }
-                $name {
-                    weights: weights,
-                }
-            }
-
-            pub fn calculate(&self, input: &::input::Input) {
-                assert_eq!(input.len(), self.weights.len(),
-                    "Input vector passed into neuron does not have the correct length! {} weights, {} inputs",
-                    self.weights.len(), input.len());
-
-                self.weights.iter().zip(input.iter()).map(|(w, i)| w * i).sum()
-            }
-        }
-    }
-}
-*/
-
 pub type OutputResults = Transient;
 
 pub struct Transient {
@@ -40,6 +11,7 @@ pub struct Transient {
 }
 
 impl Transient {
+    #[cfg(test)]
     pub fn max(&self) -> f64 {
         *self.iter()
         .max_by(|x, y| x.partial_cmp(y)
@@ -135,6 +107,7 @@ impl Neuron {
         }
     }
 
+    #[cfg(test)]
     fn get_inner_node(&self) -> Option<&Node> {
         match *self {
             Neuron::Bias => None,
@@ -159,13 +132,6 @@ impl Node {
         }
         Node {
             weights: weights.into_boxed_slice(),
-            output: 0.0,
-        }
-    }
-
-    fn fake(num_weights: usize, weight_value: f64) -> Self {
-        Node {
-            weights: vec![(0.0, weight_value); num_weights].into_boxed_slice(),
             output: 0.0,
         }
     }
@@ -198,10 +164,6 @@ struct Hidden {
 impl Hidden {
     fn new(num_weights: usize) -> Self {
         Hidden { inner: Node::new(num_weights) }
-    }
-
-    fn fake(num_weights: usize, weight_value: f64) -> Self {
-        Hidden { inner: Node::fake(num_weights, weight_value), }
     }
 
     fn update(&mut self, learning_rate: f64, momentum: f64, input: &Transient, error_terms: &[(f64, f64)]) -> ErrorTerm {
@@ -241,13 +203,6 @@ impl Output {
         Output {
             target: target,
             inner: Node::new(num_weights),
-        }
-    }
-
-    fn fake(num_weights: usize, weight_value: f64) -> Self {
-        Output {
-            target: 0.0,
-            inner: Node::fake(num_weights, weight_value),
         }
     }
 
@@ -304,27 +259,6 @@ impl Layer {
         }
     }
 
-    fn fake_with_bias(num_nodes: usize, input_length: usize) -> Self {
-        let mut nodes = Vec::with_capacity(num_nodes + 1);
-        nodes.push(Neuron::Bias);
-        for _ in 0..num_nodes {
-            nodes.push(Neuron::Hidden(Hidden::fake(input_length, 0.1)));
-        }
-        Layer {
-            nodes: nodes.into_boxed_slice(),
-        }
-    }
-
-    fn fake_output(num_nodes: usize, input_length: usize) -> Self {
-        let mut nodes = Vec::with_capacity(num_nodes);
-        for _ in 0..num_nodes {
-            nodes.push(Neuron::Output(Output::fake(input_length, 0.1)));
-        }
-        Layer {
-            nodes: nodes.into_boxed_slice(),
-        }
-    }
-
     fn calculate(&mut self, input: &Transient) -> Transient {
         Transient::from(self.nodes.par_iter_mut().map(|node| node.calculate(input)).collect::<Vec<_>>())
     }
@@ -363,29 +297,6 @@ impl Network {
             hidden: hidden,
             output: output,
         }
-    }
-
-    pub fn fake() -> Self {
-        let mut hidden = Vec::new();
-        hidden.push(Layer::fake_with_bias(2, 3));
-        let output = Layer::fake_output(1, 3);
-        Network {
-            hidden: hidden.into_boxed_slice(),
-            output: output,
-        }
-    }
-
-    pub fn fake_update(&mut self, learning_rate: f64, momentum: f64, target: f64, input: &[f64]) {
-        if let Neuron::Output(ref mut node) = *self.output.nodes.iter_mut().nth(0).unwrap() {
-            node.target = target;
-        }
-        else {
-            panic!("Node in output layer wasn't an output node!");
-        }
-        let transient_input = Transient::from(input);
-        //Transient { data: input.iter().map(f64::clone).collect::<Vec<f64>>().into_boxed_slice() };
-
-        Self::update_rec(learning_rate, momentum, &transient_input, &mut self.output, &mut self.hidden[..]);
     }
 
     pub fn update(&mut self, learning_rate: f64, momentum: f64, input: &Input) {
