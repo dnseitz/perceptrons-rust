@@ -49,18 +49,8 @@ fn exit_with_usage() -> ! {
 fn main() {
     let mut network = NetworkBuilder::new(INPUT_SIZE)
                     .add_layer(20)
-                    .finalize(10);
+                    .output(10);
 
-/*
-    let mut network = network::Network::fake();
-
-    println!("{:#?}", network);
-    network.fake_update(0.2, 0.9, 0.9, &[1.0, 1.0, 0.0]);
-    println!("{:#?}", network);
-
-    return;
-*/
-    //println!("Generated network: {:#?}", network);
     /*
     let learning_rate = match std::env::args().nth(1) {
         Some(eta) => eta.parse::<f64>().expect("learning_rate must be a number!"),
@@ -91,16 +81,7 @@ fn main() {
     //test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
 
-    /*
-        println!("Updating Network");
-        for input in training_inputs.iter() {
-            network.update(0.1, 0.9, input);
-        }
-
-        return;
-    */
-
-    for epoch in 0..NUM_EPOCHS {
+    for epoch in 1..NUM_EPOCHS+1 {
         println!("Running Epoch: {}", epoch);
         println!("Updating Network");
         for input in training_inputs.iter() {
@@ -116,21 +97,6 @@ fn main() {
     }
 
     /*
-    for epoch in 1..NUM_EPOCHS + 1 {
-        println!("Epoch {}:", epoch);
-        for input in training_inputs.iter() {
-            for perceptron in perceptrons.iter_mut() {
-                perceptron.update(learning_rate, input);
-            }
-        }
-        let training_accuracy = calculate_accuracy(&training_inputs, &perceptrons);
-        training_results.push(training_accuracy);
-        println!("Training Accuracy: {}", training_accuracy);
-        let test_accuracy = calculate_accuracy(&test_inputs, &perceptrons);
-        test_results.push(test_accuracy);
-        println!("Test Accuracy: {}", test_accuracy);
-    }
-
     let training_out = training_results.iter().map(f64::to_string).collect::<Vec<String>>().join(",");
     write_file(format!("training_eta_{}.csv", learning_rate), training_out).expect("Failed to write training data");
     let test_out = test_results.iter().map(f64::to_string).collect::<Vec<String>>().join(",");

@@ -33,10 +33,12 @@ impl Input {
         }
     }
 
+    /// Get the expected value for this input
     pub fn expected(&self) -> usize {
         self.expected
     }
 
+    /// Get a reference to the raw data
     pub fn data(&self) -> &[f64] {
         &*self.input
     }
