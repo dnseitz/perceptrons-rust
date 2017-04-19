@@ -4,6 +4,14 @@ use input::Input;
 use std::ops::{Index, Deref, DerefMut};
 use rayon::prelude::*;
 
+const BIAS_VALUE: f64 = 1.0;
+
+const RANDOM_RANGE_HIGH: f64 = 0.05;
+const RANDOM_RANGE_LOW:  f64 = -0.05;
+
+const TARGET_HIGH: f64 = 0.9;
+const TARGET_LOW:  f64 = 0.1;
+
 /// Output result from running some input through the whole network.
 pub type OutputResults = Transient;
 
@@ -93,7 +101,7 @@ impl ErrorTerm {
 }
 
 /// An enum classifying the different types of neurons
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 enum Neuron {
     Bias,
     Hidden(HiddenNode),
@@ -102,7 +110,6 @@ enum Neuron {
 
 impl Neuron {
     fn calculate(&mut self, input: &Transient) -> f64 {
-        const BIAS_VALUE: f64 = 1.0;
         match *self {
             Neuron::Bias => BIAS_VALUE,
             Neuron::Hidden(ref mut node) => node.calculate(input),
@@ -129,7 +136,7 @@ impl Neuron {
 }
 
 /// A basic node that can calulate output based on some input values
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Node {
     // (prev_delta, weight)
     weights: Box<[(f64, f64)]>,
@@ -139,11 +146,9 @@ struct Node {
 impl Node {
     // Create a new node with the given number of weights
     fn new(num_weights: usize) -> Self {
-        const RANDOM_RANGE_LOW: f64 = -0.05;
-        const RANDOM_RANGE_HIGH: f64 = 0.05;
         let mut weights = Vec::with_capacity(num_weights);
         for _ in 0..num_weights {
-            weights.push((0.0, rand::thread_rng().gen_range(-RANDOM_RANGE_LOW, RANDOM_RANGE_HIGH)));
+            weights.push((0.0, rand::thread_rng().gen_range(RANDOM_RANGE_LOW, RANDOM_RANGE_HIGH)));
         }
         Node {
             weights: weights.into_boxed_slice(),
@@ -175,7 +180,7 @@ impl<'a> From<&'a [f64]> for Node {
 }
 
 /// A hidden node
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct HiddenNode {
     inner: Node,
 }
@@ -221,7 +226,7 @@ impl DerefMut for HiddenNode {
 }
 
 /// An output node
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct OutputNode {
     target: f64,
     inner: Node,
@@ -267,7 +272,7 @@ impl DerefMut for OutputNode {
 }
 
 /// A layer encapsulating an array of `Neuron`s
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct Layer {
     nodes: Box<[Neuron]>,
 }
@@ -303,6 +308,15 @@ impl Layer {
     // Calculate the output values for each node in this layer
     fn calculate(&mut self, input: &Transient) -> Transient {
         Transient::from(
+            self.nodes.iter_mut()
+                       .map(|node| node.calculate(input))
+                       .collect::<Vec<_>>()
+        )
+    }
+
+    // Parallel version of calculate
+    fn par_calculate(&mut self, input: &Transient) -> Transient {
+        Transient::from(
             self.nodes.par_iter_mut()
                        .map(|node| node.calculate(input))
                        .collect::<Vec<_>>()
@@ -311,6 +325,20 @@ impl Layer {
 
     // Update the layer, returning the error terms for this layer
     fn update(&mut self, learning_rate: f64, momentum: f64, input: &Transient, error_terms: Vec<ErrorTerm>) -> Vec<ErrorTerm> {
+        self.nodes.iter_mut()
+                  .enumerate()
+                  .map(|(i, node)| {
+                      let e_terms = error_terms.iter()
+                                               .map(|term| (term.weights[i], term.error))
+                                               .collect::<Vec<(f64, f64)>>();
+                      node.update(learning_rate, momentum, input, &e_terms)
+                  })
+                  .filter(|e| e.is_some())
+                  .map(|e| e.unwrap())
+                  .collect::<Vec<ErrorTerm>>()
+    }
+
+    fn par_update(&mut self, learning_rate: f64, momentum: f64, input: &Transient, error_terms: Vec<ErrorTerm>) -> Vec<ErrorTerm> {
         self.nodes.par_iter_mut()
                   .enumerate()
                   .map(|(i, node)| {
@@ -334,7 +362,7 @@ impl From<Vec<Neuron>> for Layer {
 }
 
 /// A neural network able to represent several hidden layers as well as an output layer.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Network {
     hidden: Box<[Layer]>,
     output: Layer,
@@ -362,8 +390,6 @@ impl Network {
     /// Recalculates weights for each node in the network with the given `learning_rate` and
     /// `momentum` values based on the `input`.
     pub fn update(&mut self, learning_rate: f64, momentum: f64, input: &Input) {
-        const TARGET_HIGH: f64 = 0.9;
-        const TARGET_LOW: f64 = 0.1;
         let transient_input = Transient::from(input);
 
         for (i, node) in self.output.nodes.iter_mut().enumerate() {
@@ -391,6 +417,8 @@ impl Network {
         layers: &mut [Layer])
         -> Vec<ErrorTerm>
     {
+        const PAR_CALC_THRESHOLD: usize = 25;
+        const PAR_THRESHOLD: usize = 75;
         // Base case, no hidden layers left, update output layer
         if layers.len() == 0 {
             // We need to calculate the output value in order to cache it for each node
@@ -398,7 +426,12 @@ impl Network {
             output.update(learning_rate, momentum, input, Vec::new())
         }
         else {
-            let next_input = layers[0].calculate(input);
+            let next_input = if layers[0].nodes.len() > PAR_CALC_THRESHOLD {
+                layers[0].par_calculate(input)
+            }
+            else {
+                layers[0].calculate(input)
+            };
 
             let error_terms = Self::update_rec(learning_rate,
                                   momentum,
@@ -407,7 +440,12 @@ impl Network {
                                   &mut layers[1..]);
 
             // Back propagation step
-            layers[0].update(learning_rate, momentum, input, error_terms)
+            if layers[0].nodes.len() > PAR_THRESHOLD {
+                layers[0].par_update(learning_rate, momentum, input, error_terms)
+            }
+            else {
+                layers[0].update(learning_rate, momentum, input, error_terms)
+            }
         }
     }
 
@@ -490,6 +528,7 @@ impl NetworkBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test::Bencher;
 
     fn round_to(float: f64, digits: i32) -> f64 {
         (float * 10.0f64.powi(digits)).round() / 10.0f64.powi(digits)
@@ -616,5 +655,114 @@ mod tests {
         assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[0].1, 4), 0.1172);
         assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[1].1, 4), 0.1095);
         assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[2].1, 4), 0.1095);
+    }
+
+    #[bench]
+    fn bench_node_calculate(b: &mut Bencher) {
+        let mut inputs = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
+        }
+        let data = Transient::from(inputs);
+        let mut node = Node::new(1000);
+        b.iter(|| node.calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_calculate_25_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(25, 1000);
+        b.iter(|| layer.calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_par_calculate_25_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(25, 1000);
+        b.iter(|| layer.par_calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_update_25_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(25, 1000);
+        b.iter(|| layer.update(0.1, 0.9, &data, Vec::new()));
+    }
+
+    #[bench]
+    fn bench_output_layer_par_update_25_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(25, 1000);
+        b.iter(|| layer.par_update(0.1, 0.9, &data, Vec::new()));
+    }
+
+    #[bench]
+    fn bench_output_layer_calculate_50_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(50, 1000);
+        b.iter(|| layer.calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_par_calculate_50_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(50, 1000);
+        b.iter(|| layer.par_calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_calculate_100_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(100, 1000);
+        b.iter(|| layer.calculate(&data));
+    }
+
+    #[bench]
+    fn bench_output_layer_par_calculate_100_nodes(b: &mut Bencher) {
+        let mut inputs = vec![0.5; 1000];
+        inputs[0] = 1.0;
+        let data = Transient::from(inputs);
+        let mut layer = Layer::new_output(100, 1000);
+        b.iter(|| layer.par_calculate(&data));
+    }
+
+    #[bench]
+    fn bench_network_calculate(b: &mut Bencher) {
+        let mut inputs = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
+        }
+        let data = Input::from_raw(5, &inputs);
+        let mut network = NetworkBuilder::new(1000)
+                                         .add_layer(100)
+                                         .output(10);
+        b.iter(|| network.calculate(&data));
+    }
+
+    #[bench]
+    fn bench_network_update(b: &mut Bencher) {
+        let mut inputs = Vec::with_capacity(1000);
+        for _ in 0..1000 {
+            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
+        }
+        let data = Input::from_raw(5, &inputs);
+        let mut network = NetworkBuilder::new(1000)
+                                         .add_layer(100)
+                                         .output(10);
+        b.iter(|| network.update(0.1, 0.9, &data));
     }
 }

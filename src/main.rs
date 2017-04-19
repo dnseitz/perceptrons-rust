@@ -1,4 +1,8 @@
 
+#![feature(test)]
+
+extern crate test;
+
 extern crate rand;
 extern crate rayon;
 
@@ -42,23 +46,28 @@ fn parse_csv(contents: String) -> Vec<Vec<f64>> {
 }
 
 fn exit_with_usage() -> ! {
-    println!("USAGE: {} <learning_rate> [training_file test_file]", std::env::args().nth(0).unwrap());
+    println!("USAGE: {} <num_hidden_nodes> [training_file test_file]", std::env::args().nth(0).unwrap());
     std::process::exit(1);
 }
 
 fn main() {
-    let mut network = NetworkBuilder::new(INPUT_SIZE)
-                    .add_layer(20)
-                    .output(10);
-
-    /*
+/*
     let learning_rate = match std::env::args().nth(1) {
         Some(eta) => eta.parse::<f64>().expect("learning_rate must be a number!"),
         None => exit_with_usage(),
     };
+*/
+    let num_hidden_nodes = match std::env::args().nth(1) {
+        Some(n) => n.parse::<usize>().expect("number of hidden nodes must be a number!"),
+        None => exit_with_usage(),
+    };
+
+    let mut network = NetworkBuilder::new(INPUT_SIZE)
+                                     .add_layer(num_hidden_nodes)
+                                     .output(10);
     let mut training_results: Vec<f64> = Vec::with_capacity(51);
     let mut test_results: Vec<f64> = Vec::with_capacity(51);
-    */
+
     let training_filename = "mnist_train.csv";
     let test_filename = "mnist_test.csv";
     println!("Reading from {}", training_filename);
@@ -71,14 +80,13 @@ fn main() {
     println!("Parsing test data");
     let test_inputs: Vec<Input> = parse_csv(test_data).iter().map(|row| Input::from_greyscale(&row)).collect();
 
-    //println!("Calculating first input: {}", network.calculate(&training_inputs[0]));
     println!("Calculating Initial Training Accuracy");
     let training_accuracy = network.calculate_accuracy(&training_inputs);
-    //training_results.push(training_accuracy);
+    training_results.push(training_accuracy);
     println!("Training Accuracy: {}", training_accuracy);
     let test_accuracy = network.calculate_accuracy(&test_inputs);
     println!("Calculating Initial Test Accuracy");
-    //test_results.push(test_accuracy);
+    test_results.push(test_accuracy);
     println!("Test Accuracy: {}", test_accuracy);
 
     for epoch in 1..NUM_EPOCHS+1 {
@@ -89,10 +97,10 @@ fn main() {
         }
 
         let training_accuracy = network.calculate_accuracy(&training_inputs);
-        //training_results.push(training_accuracy);
+        training_results.push(training_accuracy);
         println!("Training Accuracy: {}", training_accuracy);
         let test_accuracy = network.calculate_accuracy(&test_inputs);
-        //test_results.push(test_accuracy);
+        test_results.push(test_accuracy);
         println!("Test Accuracy: {}", test_accuracy);
     }
 
