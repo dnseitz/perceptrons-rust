@@ -1,8 +1,15 @@
 
+#[cfg(test)]
+mod tests;
+#[cfg(test)]
+mod benches;
+
 use rand::{self, Rng};
 use input::Input;
 use std::ops::{Index, Deref, DerefMut};
 use rayon::prelude::*;
+use std::sync::atomic::{AtomicUsize, Ordering};
+//use ndarray::prelude::*;
 
 const BIAS_VALUE: f64 = 1.0;
 
@@ -40,10 +47,11 @@ impl OutputResults {
 /// A struct packing an array of data to be passed into a layer of the network.
 pub struct Transient {
     data: Box<[f64]>,
+    //data: Array1<f64>,
 }
 
 impl Transient {
-    fn iter(&self) -> ::std::slice::Iter<f64> {
+    fn iter(&self) -> /*::ndarray::iter::Iter<f64, ::ndarray::Dim<[usize; 1]>> {*/ ::std::slice::Iter<f64> {
         self.data.iter()
     }
 
@@ -70,6 +78,7 @@ impl From<Vec<f64>> for Transient {
     fn from(data: Vec<f64>) -> Self {
         Transient {
             data: data.into_boxed_slice(),
+            //data: Array::from_vec(data),
         }
     }
 }
@@ -78,6 +87,7 @@ impl<'a> From<&'a [f64]> for Transient {
     fn from(data: &[f64]) -> Self {
         Transient {
             data: data.iter().map(f64::clone).collect::<Vec<_>>().into_boxed_slice(),
+            //data: Array::from_iter(data.iter().map(f64::clone)),
         }
     }
 }
@@ -109,11 +119,19 @@ enum Neuron {
 }
 
 impl Neuron {
-    fn calculate(&mut self, input: &Transient) -> f64 {
+    fn cached_calculate(&mut self, input: &Transient) -> f64 {
         match *self {
             Neuron::Bias => BIAS_VALUE,
-            Neuron::Hidden(ref mut node) => node.calculate(input),
-            Neuron::Output(ref mut node) => node.calculate(input),
+            Neuron::Hidden(ref mut node) => node.cached_calculate(input),
+            Neuron::Output(ref mut node) => node.cached_calculate(input),
+        }
+    }
+
+    fn calculate(&self, input: &Transient) -> f64 {
+        match *self {
+            Neuron::Bias => BIAS_VALUE,
+            Neuron::Hidden(ref node) => node.calculate(input),
+            Neuron::Output(ref node) => node.calculate(input),
         }
     }
 
@@ -140,6 +158,7 @@ impl Neuron {
 struct Node {
     // (prev_delta, weight)
     weights: Box<[(f64, f64)]>,
+    //weights: Array1<(f64, f64)>,
     output: f64,
 }
 
@@ -152,21 +171,31 @@ impl Node {
         }
         Node {
             weights: weights.into_boxed_slice(),
+            //weights: Array::from_vec(weights),
             output: 0.0,
         }
     }
 
     // Calculate the output for this node with a given input vector
-    fn calculate(&mut self, input: &Transient) -> f64 {
-        assert_eq!(input.len(), self.weights.len(),
+    fn cached_calculate(&mut self, input: &Transient) -> f64 {
+        debug_assert_eq!(input.len(), self.weights.len(),
             "Input vector passed into neuron does not have the correct length!");
+        //let z = self.weights.iter().map(|&(_, w)| w).collect::<Array1<f64>>().dot(&input.data);
 
         // Sigmoid activation function:
         //      sigma(w * x) = sigma(z) = 1 / (1 + e^-z)
         //
         // Optimization: cache the output for use in the update function
-        self.output = 1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) );
+        self.output = self.calculate(input);
+        //self.output = 1.0 / ( 1.0 + ::std::f64::consts::E.powf(-z) );
         self.output
+    }
+
+    fn calculate(&self, input: &Transient) -> f64 {
+        debug_assert_eq!(input.len(), self.weights.len(),
+            "Input vector passed into neuron does not have the correct length!");
+
+        1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) )
     }
 }
 
@@ -174,6 +203,7 @@ impl<'a> From<&'a [f64]> for Node {
     fn from(weights: &[f64]) -> Self {
         Node {
             weights: weights.iter().map(|&w| (0.0, w)).collect::<Vec<_>>().into_boxed_slice(),
+            //weights: Array::from_iter(weights.iter().map(|&w| (0.0, w))),
             output: 0.0,
         }
     }
@@ -305,19 +335,35 @@ impl Layer {
         }
     }
 
-    // Calculate the output values for each node in this layer
-    fn calculate(&mut self, input: &Transient) -> Transient {
+    fn cached_calculate(&mut self, input: &Transient) -> Transient {
         Transient::from(
             self.nodes.iter_mut()
+                      .map(|node| node.cached_calculate(input))
+                      .collect::<Vec<_>>()
+        )
+    }
+
+    // Calculate the output values for each node in this layer
+    fn calculate(&self, input: &Transient) -> Transient {
+        Transient::from(
+            self.nodes.iter()
                        .map(|node| node.calculate(input))
                        .collect::<Vec<_>>()
         )
     }
 
-    // Parallel version of calculate
-    fn par_calculate(&mut self, input: &Transient) -> Transient {
+    fn par_cached_calculate(&mut self, input: &Transient) -> Transient {
         Transient::from(
             self.nodes.par_iter_mut()
+                      .map(|node| node.cached_calculate(input))
+                      .collect::<Vec<_>>()
+        )
+    }
+
+    // Parallel version of calculate
+    fn par_calculate(&self, input: &Transient) -> Transient {
+        Transient::from(
+            self.nodes.par_iter()
                        .map(|node| node.calculate(input))
                        .collect::<Vec<_>>()
         )
@@ -422,15 +468,15 @@ impl Network {
         // Base case, no hidden layers left, update output layer
         if layers.len() == 0 {
             // We need to calculate the output value in order to cache it for each node
-            output.calculate(input);
+            output.cached_calculate(input);
             output.update(learning_rate, momentum, input, Vec::new())
         }
         else {
             let next_input = if layers[0].nodes.len() > PAR_CALC_THRESHOLD {
-                layers[0].par_calculate(input)
+                layers[0].par_cached_calculate(input)
             }
             else {
-                layers[0].calculate(input)
+                layers[0].cached_calculate(input)
             };
 
             let error_terms = Self::update_rec(learning_rate,
@@ -449,16 +495,39 @@ impl Network {
         }
     }
 
-    pub fn calculate(&mut self, input: &Input) -> OutputResults {
+    pub fn calculate(&self, input: &Input) -> OutputResults {
+        const PAR_CALC_THRESHOLD: usize = 25;
+        const PAR_THRESHOLD: usize = 75;
+
         let mut transient_input = Transient::from(input);
 
-        for layer in self.hidden.iter_mut() {
-            transient_input = layer.calculate(&transient_input);
+        for layer in self.hidden.iter() {
+            transient_input = if layer.nodes.len() > PAR_CALC_THRESHOLD {
+                layer.par_calculate(&transient_input)
+            }
+            else {
+                layer.calculate(&transient_input)
+            };
         }
-        self.output.calculate(&transient_input)
+        if self.output.nodes.len() > PAR_CALC_THRESHOLD {
+            self.output.par_calculate(&transient_input)
+        }
+        else {
+            self.output.calculate(&transient_input)
+        }
     }
 
-    pub fn calculate_accuracy(&mut self, data_set: &[Input]) -> f64 {
+    pub fn calculate_accuracy(&self, data_set: &[Input]) -> f64 {
+        const PAR_SET_SIZE_THRESHOLD: usize = 1000;
+        if data_set.len() > PAR_SET_SIZE_THRESHOLD {
+            self.par_calculate_accuracy(data_set)
+        }
+        else {
+            self.seq_calculate_accuracy(data_set)
+        }
+    }
+
+    fn seq_calculate_accuracy(&self, data_set: &[Input]) -> f64 {
         let mut correct = 0;
         for input in data_set {
             let predicted = self.calculate(&input).max_class();
@@ -467,6 +536,17 @@ impl Network {
             }
         }
         ((correct as f64) / (data_set.len() as f64))
+    }
+
+    fn par_calculate_accuracy(&self, data_set: &[Input]) -> f64 {
+        let correct: AtomicUsize = AtomicUsize::new(0);
+        data_set.par_iter().for_each(|input| {
+            let predicted = self.calculate(&input).max_class();
+            if predicted == input.expected() {
+                correct.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        ((correct.load(Ordering::Relaxed) as f64) / (data_set.len() as f64))
     }
 }
 
@@ -522,247 +602,5 @@ impl NetworkBuilder {
             }
         }
         Network::new(self.input_len, layers.into_boxed_slice(), num_outputs)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use test::Bencher;
-
-    fn round_to(float: f64, digits: i32) -> f64 {
-        (float * 10.0f64.powi(digits)).round() / 10.0f64.powi(digits)
-    }
-
-    #[test]
-    fn test_node_calculate() {
-        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-        let mut node = Node::from(&[0.1, 0.1, 0.1][..]);
-        assert_eq!(round_to(node.calculate(&data), 2), 0.55);
-    }
-
-    #[test]
-    fn test_output_update() {
-        let data = Transient::from(&[1.0, 0.55, 0.55][..]);
-        let mut node = OutputNode {
-            target: 0.9,
-            inner: Node::from(&[0.1, 0.1, 0.1][..]),
-        };
-        node.calculate(&data);
-        node.update(0.2, 0.9, &data);
-        assert_eq!(round_to(node.inner.weights[0].1, 4), 0.1172);
-        assert_eq!(round_to(node.inner.weights[1].1, 4), 0.1095);
-        assert_eq!(round_to(node.inner.weights[2].1, 4), 0.1095);
-    }
-
-    #[test]
-    fn test_hidden_update() {
-        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-        let mut node = HiddenNode {
-            inner: Node::from(&[0.1, 0.1, 0.1][..]),
-        };
-        node.calculate(&data);
-        node.update(0.2, 0.9, &data, &[(0.086, 0.1)]);
-        assert_eq!(round_to(node.inner.weights[0].1, 4), 0.1004);
-        assert_eq!(round_to(node.inner.weights[1].1, 4), 0.1004);
-        assert_eq!(round_to(node.inner.weights[2].1, 4), 0.1000);
-    }
-
-    #[test]
-    fn test_layer_calculate() {
-        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-        let mut layer = Layer::from(vec![Neuron::Bias,
-            Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
-            Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
-        ]);
-        let result = layer.calculate(&data);
-        assert_eq!(round_to(result.data[0], 2), 1.00);
-        assert_eq!(round_to(result.data[1], 2), 0.55);
-        assert_eq!(round_to(result.data[2], 2), 0.55);
-    }
-
-    #[test]
-    fn test_layer_update() {
-        let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-        let error_terms = vec![ErrorTerm::new(0.086, vec![0.1, 0.1, 0.1].into_boxed_slice())];
-        let mut layer = Layer::from(vec![Neuron::Bias,
-            Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
-            Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
-        ]);
-        layer.calculate(&data);
-        let new_error_terms = layer.update(0.2, 0.9, &data, error_terms);
-
-        // First hidden node's weights
-        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
-        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
-        assert_eq!(round_to(layer.nodes[1].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
-
-        // Second hidden node's weights
-        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
-        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
-        assert_eq!(round_to(layer.nodes[2].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
-
-        assert_eq!(round_to(new_error_terms[0].error, 3), 0.002);
-        assert_eq!(round_to(new_error_terms[1].error, 3), 0.002);
-    }
-
-    #[test]
-    fn test_network_calculate() {
-        let data = Input::from_raw(0, &[1.0, 1.0, 0.0]);
-        let mut network = Network::from(vec![
-            Layer::from(vec![Neuron::Bias,
-                Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
-                Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
-            ]),
-            Layer::from(vec![Neuron::Output(OutputNode {
-                inner: Node::from(&[0.1, 0.1, 0.1][..]),
-                target: 0.9,
-            })])
-        ]);
-
-        let result = network.calculate(&data);
-
-        assert_eq!(round_to(result.max(), 3), 0.552);
-    }
-
-    #[test]
-    fn test_network_update() {
-        let data = Input::from_raw(0, &[0.0, 1.0, 0.0]);
-        let mut network = Network::from(vec![
-            Layer::from(vec![Neuron::Bias,
-                Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
-                Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
-            ]),
-            Layer::from(vec![Neuron::Output(OutputNode {
-                inner: Node::from(&[0.1, 0.1, 0.1][..]),
-                target: 0.9,
-            })])
-        ]);
-
-        network.update(0.2, 0.9, &data);
-
-        // First hidden node's weights
-        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
-        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
-        assert_eq!(round_to(network.hidden[0].nodes[1].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
-
-        // Second hidden node's weights
-        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[0].1, 4), 0.1004);
-        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[1].1, 4), 0.1004);
-        assert_eq!(round_to(network.hidden[0].nodes[2].get_inner_node().unwrap().weights[2].1, 4), 0.1000);
-
-        // Output node's weights
-        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[0].1, 4), 0.1172);
-        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[1].1, 4), 0.1095);
-        assert_eq!(round_to(network.output.nodes[0].get_inner_node().unwrap().weights[2].1, 4), 0.1095);
-    }
-
-    #[bench]
-    fn bench_node_calculate(b: &mut Bencher) {
-        let mut inputs = Vec::with_capacity(1000);
-        for _ in 0..1000 {
-            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
-        }
-        let data = Transient::from(inputs);
-        let mut node = Node::new(1000);
-        b.iter(|| node.calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_calculate_25_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(25, 1000);
-        b.iter(|| layer.calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_par_calculate_25_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(25, 1000);
-        b.iter(|| layer.par_calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_update_25_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(25, 1000);
-        b.iter(|| layer.update(0.1, 0.9, &data, Vec::new()));
-    }
-
-    #[bench]
-    fn bench_output_layer_par_update_25_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(25, 1000);
-        b.iter(|| layer.par_update(0.1, 0.9, &data, Vec::new()));
-    }
-
-    #[bench]
-    fn bench_output_layer_calculate_50_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(50, 1000);
-        b.iter(|| layer.calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_par_calculate_50_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(50, 1000);
-        b.iter(|| layer.par_calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_calculate_100_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(100, 1000);
-        b.iter(|| layer.calculate(&data));
-    }
-
-    #[bench]
-    fn bench_output_layer_par_calculate_100_nodes(b: &mut Bencher) {
-        let mut inputs = vec![0.5; 1000];
-        inputs[0] = 1.0;
-        let data = Transient::from(inputs);
-        let mut layer = Layer::new_output(100, 1000);
-        b.iter(|| layer.par_calculate(&data));
-    }
-
-    #[bench]
-    fn bench_network_calculate(b: &mut Bencher) {
-        let mut inputs = Vec::with_capacity(1000);
-        for _ in 0..1000 {
-            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
-        }
-        let data = Input::from_raw(5, &inputs);
-        let mut network = NetworkBuilder::new(1000)
-                                         .add_layer(100)
-                                         .output(10);
-        b.iter(|| network.calculate(&data));
-    }
-
-    #[bench]
-    fn bench_network_update(b: &mut Bencher) {
-        let mut inputs = Vec::with_capacity(1000);
-        for _ in 0..1000 {
-            inputs.push(rand::thread_rng().gen_range(0.0, 1.0));
-        }
-        let data = Input::from_raw(5, &inputs);
-        let mut network = NetworkBuilder::new(1000)
-                                         .add_layer(100)
-                                         .output(10);
-        b.iter(|| network.update(0.1, 0.9, &data));
     }
 }

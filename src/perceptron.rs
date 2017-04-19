@@ -51,7 +51,7 @@ impl Debug for Perceptron {
     }
 }
 
-fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
+pub fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
     perceptrons.iter()
         .map(|perceptron| (perceptron.calculate(data), perceptron.target_class()))
         .max_by(|&(x, _), &(y, _)| x.partial_cmp(&y).expect("Unable to find max value!"))
@@ -59,7 +59,7 @@ fn predict(data: &Input, perceptrons: &[Perceptron]) -> usize {
         .1
 }
 
-fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
+pub fn calculate_accuracy(data_set: &[Input], perceptrons: &[Perceptron]) -> f64 {
     let mut correct = 0;
     for input in data_set {
         let predicted = predict(input, perceptrons);

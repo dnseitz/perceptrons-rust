@@ -33,6 +33,10 @@ impl Input {
         }
     }
 
+    pub fn iter(&self) -> ::std::slice::Iter<f64> {
+        self.input.iter()
+    }
+
     /// Get the expected value for this input
     pub fn expected(&self) -> usize {
         self.expected

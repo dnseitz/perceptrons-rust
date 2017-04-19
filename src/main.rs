@@ -1,23 +1,21 @@
 
-#![feature(test)]
+extern crate perceptron;
 
-extern crate test;
-
-extern crate rand;
-extern crate rayon;
-
+/*
 mod input;
 mod network;
+*/
+extern crate rayon;
 
 use std::fs::File;
 use std::path::Path;
 use std::io;
 use std::io::prelude::*;
-use input::Input;
+use perceptron::input::Input;
 use rayon::prelude::*;
-use network::NetworkBuilder;
+use perceptron::network::NetworkBuilder;
+use perceptron::INPUT_SIZE;
 
-const INPUT_SIZE: usize = 785;
 const NUM_EPOCHS: usize = 50;
 
 fn read_file<P: AsRef<Path>>(path: P) -> io::Result<String> {
