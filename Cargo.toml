@@ -11,3 +11,4 @@ doc = false
 rand = "0.3"
 rayon = "0.7.0"
 ndarray = "0.9.1"
+rblas = "0.0.13"

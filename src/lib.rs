@@ -8,6 +8,7 @@ extern crate test;
 extern crate rand;
 extern crate rayon;
 extern crate ndarray;
+extern crate rblas;
 
 pub const INPUT_SIZE: usize = 785;
 

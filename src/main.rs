@@ -60,9 +60,9 @@ fn main() {
         None => exit_with_usage(),
     };
 
-    let mut network = NetworkBuilder::new(INPUT_SIZE)
-                                     .add_layer(num_hidden_nodes)
-                                     .output(10);
+    let mut network = NetworkBuilder::input_layer(INPUT_SIZE)
+                                     .hidden_layer(num_hidden_nodes)
+                                     .output_layer(10);
     let mut training_results: Vec<f64> = Vec::with_capacity(51);
     let mut test_results: Vec<f64> = Vec::with_capacity(51);
 

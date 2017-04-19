@@ -8,7 +8,7 @@ fn round_to(float: f64, digits: i32) -> f64 {
 #[test]
 fn test_node_calculate() {
     let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-    let mut node = Node::from(&[0.1, 0.1, 0.1][..]);
+    let node = Node::from(&[0.1, 0.1, 0.1][..]);
     assert_eq!(round_to(node.calculate(&data), 2), 0.55);
 }
 
@@ -42,7 +42,7 @@ fn test_hidden_update() {
 #[test]
 fn test_layer_calculate() {
     let data = Transient::from(&[1.0, 1.0, 0.0][..]);
-    let mut layer = Layer::from(vec![Neuron::Bias,
+    let layer = Layer::from(vec![Neuron::Bias,
         Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
         Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })
     ]);
@@ -80,7 +80,7 @@ fn test_layer_update() {
 #[test]
 fn test_network_calculate() {
     let data = Input::from_raw(0, &[1.0, 1.0, 0.0]);
-    let mut network = Network::from(vec![
+    let network = Network::from(vec![
         Layer::from(vec![Neuron::Bias,
             Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) }),
             Neuron::Hidden(HiddenNode { inner: Node::from(&[0.1, 0.1, 0.1][..]) })

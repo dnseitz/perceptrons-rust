@@ -9,6 +9,7 @@ use input::Input;
 use std::ops::{Index, Deref, DerefMut};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use rblas::Dot;
 //use ndarray::prelude::*;
 
 const BIAS_VALUE: f64 = 1.0;
@@ -194,8 +195,9 @@ impl Node {
     fn calculate(&self, input: &Transient) -> f64 {
         debug_assert_eq!(input.len(), self.weights.len(),
             "Input vector passed into neuron does not have the correct length!");
-
-        1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) )
+        let z = Dot::dot(&self.weights.iter().map(|&(_, w)| w).collect::<Vec<f64>>(), &input.data[..self.weights.len()]);
+        1.0 / ( 1.0 + ::std::f64::consts::E.powf(-z) )
+        //1.0 / ( 1.0 + ::std::f64::consts::E.powf(-self.weights.iter().zip(input.iter()).map(|(w, i)| w.1 * i).sum::<f64>()) )
     }
 }
 
@@ -574,7 +576,7 @@ pub struct NetworkBuilder {
 
 impl NetworkBuilder {
     /// Create a new Network with a given input layer size.
-    pub fn new(input_len: usize) -> Self {
+    pub fn input_layer(input_len: usize) -> Self {
         NetworkBuilder {
             input_len: input_len,
             layers: Vec::new(),
@@ -582,7 +584,7 @@ impl NetworkBuilder {
     }
 
     /// Add a new input layer with the given size.
-    pub fn add_layer(mut self, layer_size: usize) -> Self {
+    pub fn hidden_layer(mut self, layer_size: usize) -> Self {
         self.layers.push(layer_size);
         self
     }
@@ -590,7 +592,7 @@ impl NetworkBuilder {
     /// Add the output layer with the given layer size.
     ///
     /// Return the `Network` with randomly generated weights.
-    pub fn output(self, num_outputs: usize) -> Network {
+    pub fn output_layer(self, num_outputs: usize) -> Network {
         let mut layers: Vec<Layer> = Vec::with_capacity(self.layers.len());
         for num_nodes in self.layers {
             if layers.is_empty() {
